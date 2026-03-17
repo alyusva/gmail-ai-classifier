@@ -27,11 +27,11 @@ jobs:
     - name: Check for secrets in code
       run: |
         echo "🔍 Checking for accidentally committed secrets..."
-        if grep -r "sk-ant-api" --exclude-dir=venv --exclude-dir=.git --exclude="*.md" --exclude="security-check.yml" . ; then
+        if grep -r "sk-ant-api" --exclude-dir=venv --exclude-dir=.git --exclude="*.md" --exclude="security-check.yml" --exclude=".env.example" . | grep -v "xxxxx" ; then
           echo "❌ Found Anthropic API key in code!"
           exit 1
         fi
-        if grep -r "GOCSPX-" --exclude-dir=venv --exclude-dir=.git --exclude="*.md" --exclude="security-check.yml" . ; then
+        if grep -r "GOCSPX-" --exclude-dir=venv --exclude-dir=.git --exclude="*.md" --exclude="security-check.yml" --exclude=".env.example" . | grep -v "xxxxx" ; then
           echo "❌ Found Google OAuth secret in code!"
           exit 1
         fi

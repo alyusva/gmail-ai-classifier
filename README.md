@@ -199,16 +199,46 @@ Puedes cambiar el prefijo en `config.py` → `LABEL_PREFIX`.
 
 ## 🛡️ Seguridad
 
-- `credentials.json` y `data/token.json` contienen credenciales sensibles → **no los subas a Git**
-- Añade al `.gitignore`:
+### Archivos sensibles protegidos
 
-```gitignore
-credentials.json
-data/
-*.db
+El proyecto incluye un `.gitignore` completo que protege automáticamente:
+
+- ✅ `credentials.json` - Credenciales OAuth de Google
+- ✅ `.env` - Variables de entorno con API keys
+- ✅ `data/` - Base de datos local y tokens
+- ✅ `*.db` - Archivos SQLite
+- ✅ `token.json` - Tokens OAuth generados
+
+### Variables de entorno
+
+Usa el archivo `.env` para configuración local (ya está en `.gitignore`):
+
+```bash
+# Copia el template
+cp .env.example .env
+
+# Edita con tus credenciales
+nano .env
 ```
 
-- Los permisos solicitados son `gmail.modify` y `gmail.labels` (lectura + modificar etiquetas, NO puede enviar emails ni borrar)
+### GitHub Secrets (para CI/CD)
+
+Si usas GitHub Actions, configura estos secrets:
+
+```bash
+# Usando gh CLI
+gh secret set ANTHROPIC_API_KEY
+gh secret set SUPABASE_URL
+gh secret set SUPABASE_ANON_KEY
+```
+
+### Permisos de Gmail
+
+Los permisos solicitados son mínimos:
+- ✅ `gmail.modify` - Modificar etiquetas
+- ✅ `gmail.labels` - Gestionar etiquetas
+- ❌ NO puede enviar emails
+- ❌ NO puede borrar emails
 
 ## 🌐 Web App & Cloud Deployment
 

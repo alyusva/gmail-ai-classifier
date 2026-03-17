@@ -1,0 +1,78 @@
+name: Security Check
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit
+
+    - name: Check for secrets in code
+      run: |
+        echo "🔍 Checking for accidentally committed secrets..."
+        if grep -r "sk-ant-api" --exclude-dir=venv --exclude-dir=.git --exclude="*.md" --exclude="security-check.yml" . ; then
+          echo "❌ Found Anthropic API key in code!"
+          exit 1
+        fi
+        if grep -r "GOCSPX-" --exclude-dir=venv --exclude-dir=.git --exclude="*.md" --exclude="security-check.yml" . ; then
+          echo "❌ Found Google OAuth secret in code!"
+          exit 1
+        fi
+        echo "✅ No secrets found in code"
+
+    - name: Check for sensitive files
+      run: |
+        echo "🔍 Checking for sensitive files..."
+        if [ -f "credentials.json" ]; then
+          echo "❌ credentials.json should not be in repository!"
+          exit 1
+        fi
+        if [ -f ".env" ] && [ ".env" != ".env.example" ]; then
+          echo "❌ .env should not be in repository!"
+          exit 1
+        fi
+        echo "✅ No sensitive files found"
+
+    - name: Verify .gitignore coverage
+      run: |
+        echo "🔍 Verifying .gitignore..."
+        grep -q "credentials.json" .gitignore || (echo "❌ credentials.json not in .gitignore" && exit 1)
+        grep -q "\.env" .gitignore || (echo "❌ .env not in .gitignore" && exit 1)
+        grep -q "token.json" .gitignore || (echo "❌ token.json not in .gitignore" && exit 1)
+        echo "✅ .gitignore properly configured"
+
+    - name: Run dependency vulnerability scan
+      run: |
+        echo "🔍 Scanning dependencies for vulnerabilities..."
+        pip install -r requirements.txt
+        safety check --json || echo "⚠️ Some vulnerabilities found, review recommended"
+
+    - name: Run security linter (Bandit)
+      run: |
+        echo "🔍 Running security linter..."
+        bandit -r gmail_classifier/ -f json -o bandit-report.json || true
+        if [ -f bandit-report.json ]; then
+          cat bandit-report.json
+        fi
+
+    - name: Summary
+      run: |
+        echo "✅ Security checks completed!"
+        echo "📊 Review the results above"

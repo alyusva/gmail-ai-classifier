@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-base:      #050913;
+  --bg-surface:   #0A1020;
+  --bg-card:      #0D1428;
+  --border-dim:   #152040;
+  --border-mid:   #1E3060;
+  --blue:         #2D7CF0;
+  --blue-bright:  #5BA4F5;
+  --violet:       #6D28D9;
+  --violet-bright:#8B5CF6;
+  --tx-primary:   #B8C9E0;
+  --tx-secondary: #4A6285;
+  --tx-muted:     #2A3D5C;
+  --success:      #10B981;
+  --warning:      #F59E0B;
+  --danger:       #EF4444;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background-color: var(--bg-base);
+  color: var(--tx-primary);
+  font-family: 'IBM Plex Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Dot-grid background on main content */
+.dot-grid {
+  background-image: radial-gradient(circle, #1a2744 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-surface); }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 2px; }
+
+/* Input reset */
+input { font-family: inherit; }
+button { font-family: inherit; }
+
+/* Smooth row hover */
+tr { transition: background-color 0.1s ease; }

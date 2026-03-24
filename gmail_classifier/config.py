@@ -60,3 +60,16 @@ LABEL_PREFIX = os.getenv("LABEL_PREFIX", "AutoSort")  # Las etiquetas se crean c
 # === Logging ===
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = DATA_DIR / "classifier.log"
+
+# === Supabase (base de datos en la nube) ===
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+
+# === Modo de base de datos ===
+# "local"    → SQLite en DATA_DIR/emails.db
+# "supabase" → PostgreSQL en Supabase
+DB_MODE = os.getenv("DB_MODE", "local")
+
+# Alias para compatibilidad con scripts de migración
+DB_FILE = str(DB_PATH)

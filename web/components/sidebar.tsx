@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useSession, signOut } from 'next-auth/react'
 
 const NAV = [
   {
@@ -37,19 +38,35 @@ const NAV = [
       </svg>
     ),
   },
+  {
+    href: '/pricing',
+    label: 'Planes',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 1 0 0 7h5a3.5 3.5 0 1 1 0 7H6" />
+      </svg>
+    ),
+  },
 ]
+
+const PLAN_COLORS: Record<string, { color: string; bg: string }> = {
+  free:     { color: '#4A6285', bg: 'rgba(74,98,133,0.1)'  },
+  pro:      { color: '#2D7CF0', bg: 'rgba(45,124,240,0.1)' },
+  business: { color: '#8B5CF6', bg: 'rgba(139,92,246,0.1)' },
+}
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { data: session } = useSession()
+  const plan = (session as any)?.subscription?.plan ?? 'free'
+  const pc = PLAN_COLORS[plan] ?? PLAN_COLORS.free
 
   return (
     <aside style={{
-      width: 216,
-      minWidth: 216,
+      width: 216, minWidth: 216,
       backgroundColor: '#0A1020',
       borderRight: '1px solid #152040',
-      display: 'flex',
-      flexDirection: 'column',
+      display: 'flex', flexDirection: 'column',
     }}>
       {/* Logo */}
       <div style={{ padding: '22px 18px', borderBottom: '1px solid #152040' }}>
@@ -57,18 +74,15 @@ export function Sidebar() {
           <div style={{
             width: 34, height: 34,
             background: 'linear-gradient(135deg, #2D7CF0 0%, #6D28D9 100%)',
-            borderRadius: 9,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 17, flexShrink: 0,
-          }}>
-            ✉
-          </div>
+          }}>✉</div>
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#B8C9E0', letterSpacing: '0.01em' }}>
               Gmail Classifier
             </div>
             <div style={{ fontSize: 10, color: '#2A3D5C', fontFamily: 'IBM Plex Mono, monospace', marginTop: 1 }}>
-              ai · personal
+              ai · saas
             </div>
           </div>
         </div>
@@ -94,21 +108,65 @@ export function Sidebar() {
             }}>
               <span style={{ opacity: active ? 1 : 0.6, display: 'flex' }}>{icon}</span>
               {label}
-              {active && (
-                <span style={{ marginLeft: 'auto', width: 5, height: 5, borderRadius: '50%', backgroundColor: '#2D7CF0', flexShrink: 0 }} />
-              )}
+              {active && <span style={{ marginLeft: 'auto', width: 5, height: 5, borderRadius: '50%', backgroundColor: '#2D7CF0', flexShrink: 0 }} />}
             </Link>
           )
         })}
       </nav>
 
-      {/* Footer */}
-      <div style={{ padding: '14px 18px', borderTop: '1px solid #152040' }}>
-        <div style={{ fontSize: 10, color: '#2A3D5C', fontFamily: 'IBM Plex Mono, monospace', lineHeight: 1.6 }}>
-          Supabase · eu-west-3<br />
-          <span style={{ color: '#1E3060' }}>rptnhggbsnuuxgvwobmm</span>
+      {/* User footer */}
+      {session?.user && (
+        <div style={{ padding: '14px 12px', borderTop: '1px solid #152040' }}>
+          {/* Plan badge */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '5px 10px', borderRadius: 6, marginBottom: 10,
+            backgroundColor: pc.bg, border: `1px solid ${pc.color}22`,
+          }}>
+            <span style={{ fontSize: 10, color: pc.color, fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600 }}>
+              {plan.toUpperCase()}
+            </span>
+            {plan === 'free' && (
+              <Link href="/pricing" style={{ fontSize: 10, color: '#2D7CF0', textDecoration: 'none' }}>
+                Upgrade →
+              </Link>
+            )}
+          </div>
+
+          {/* User info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
+            {session.user.image ? (
+              <img src={session.user.image} alt="" style={{ width: 28, height: 28, borderRadius: '50%', flexShrink: 0 }} />
+            ) : (
+              <div style={{ width: 28, height: 28, borderRadius: '50%', backgroundColor: '#152040', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#4A6285' }}>
+                {session.user.name?.[0] ?? '?'}
+              </div>
+            )}
+            <div style={{ overflow: 'hidden' }}>
+              <div style={{ fontSize: 12, color: '#B8C9E0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {session.user.name}
+              </div>
+              <div style={{ fontSize: 10, color: '#2A3D5C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {session.user.email}
+              </div>
+            </div>
+          </div>
+
+          {/* Logout */}
+          <button
+            onClick={() => signOut({ callbackUrl: '/login' })}
+            style={{
+              width: '100%', padding: '7px', borderRadius: 6, cursor: 'pointer',
+              backgroundColor: 'transparent', border: '1px solid #152040',
+              color: '#4A6285', fontSize: 11, transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { (e.target as HTMLButtonElement).style.borderColor = '#EF4444'; (e.target as HTMLButtonElement).style.color = '#EF4444' }}
+            onMouseLeave={e => { (e.target as HTMLButtonElement).style.borderColor = '#152040'; (e.target as HTMLButtonElement).style.color = '#4A6285' }}
+          >
+            Cerrar sesión
+          </button>
         </div>
-      </div>
+      )}
     </aside>
   )
 }

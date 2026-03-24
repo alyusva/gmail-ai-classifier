@@ -16,7 +16,15 @@ from loguru import logger
 from tabulate import tabulate
 
 from . import config
-from .db import init_db, get_stats, count_emails, count_unclassified
+
+
+def _get_db_module():
+    """Devuelve el módulo de BD según DB_MODE (local o supabase)."""
+    if config.DB_MODE == "supabase":
+        from . import supabase_db as db_module
+    else:
+        from . import db as db_module
+    return db_module
 
 
 def setup_logging(verbose: bool = False):
@@ -81,8 +89,9 @@ def cmd_apply(args):
 
 def cmd_stats(args):
     """Muestra estadísticas de clasificación."""
-    init_db()
-    stats = get_stats()
+    db = _get_db_module()
+    db.init_db()
+    stats = db.get_stats()
 
     print("\n" + "=" * 60)
     print("📊 ESTADÍSTICAS DE CLASIFICACIÓN")
@@ -218,6 +227,12 @@ Flujo recomendado:
         """,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Modo verbose")
+    parser.add_argument(
+        "--db",
+        choices=["local", "supabase"],
+        default=None,
+        help="Backend de BD: local (SQLite) o supabase. Por defecto usa DB_MODE del .env",
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="Comando a ejecutar")
 
@@ -272,6 +287,15 @@ Flujo recomendado:
 
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
+
+    # Permite sobrescribir DB_MODE desde CLI
+    if args.db:
+        config.DB_MODE = args.db
+
+    if config.DB_MODE == "supabase":
+        logger.info("Backend: Supabase ({})", config.SUPABASE_URL or "URL no configurada")
+    else:
+        logger.info("Backend: SQLite local ({})", config.DB_PATH)
 
     if not args.command:
         parser.print_help()

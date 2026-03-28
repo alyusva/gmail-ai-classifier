@@ -7,6 +7,18 @@
       "runtimeArgs": ["run", "dev"],
       "cwd": "web",
       "port": 3000
+    },
+    {
+      "name": "FastAPI Backend",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["api.main:app", "--reload", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "Stripe Webhook",
+      "runtimeExecutable": "stripe",
+      "runtimeArgs": ["listen", "--forward-to", "localhost:3000/api/stripe/webhook"],
+      "port": 4242
     }
   ]
 }

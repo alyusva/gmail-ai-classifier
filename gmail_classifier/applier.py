@@ -40,34 +40,53 @@ def create_gmail_label(service, label_name: str) -> str:
         raise
 
 
-def ensure_labels_exist(service, dry_run: bool = False) -> dict[str, str]:
+def ensure_labels_exist(
+    service, categories: list[str] | None = None, dry_run: bool = False
+) -> dict[str, str]:
     """
-    Crea todas las etiquetas necesarias en Gmail.
-    Retorna {categoría: gmail_label_id}.
-    """
-    # Obtener categorías necesarias desde las clasificaciones
-    stats = db.get_stats()
-    categories = list(stats["distribution"].keys())
+    Crea todas las etiquetas necesarias en Gmail: la label de marca
+    `MARKER_LABEL` (p.ej. "IA", aplicada a todo email procesado para poder
+    detectar correo nuevo sin base de datos) + una por categoría, sueltas de
+    nivel superior (sin prefijo compartido — el "/" de categorías como
+    "Bancos/Finanzas" es parte de su propio nombre, no un prefijo añadido).
 
-    if not categories:
-        logger.warning("No hay clasificaciones, no se crean etiquetas.")
-        return {}
+    Retorna {categoría: gmail_label_id, "__marker__": gmail_label_id}.
+    """
+    if categories is None:
+        # Uso local (CLI): categorías realmente presentes en las clasificaciones
+        # + la taxonomía completa, para que siempre queden creadas de antemano.
+        stats = db.get_stats()
+        categories = sorted(
+            set(stats["distribution"].keys())
+            | set(config.DEFAULT_TAXONOMY)
+            | {config.FALLBACK_CATEGORY}
+        )
 
     existing = get_existing_labels(service)
     label_map = {}
 
-    for category in categories:
-        full_name = f"{config.LABEL_PREFIX}/{category}"
+    # Label de marca: indica "ya clasificado", no es padre de las categorías.
+    if config.MARKER_LABEL in existing:
+        marker_id = existing[config.MARKER_LABEL]
+    elif dry_run:
+        marker_id = "DRY_RUN_marker"
+        logger.info("[DRY RUN] Se crearía etiqueta de marca: {}", config.MARKER_LABEL)
+    else:
+        marker_id = create_gmail_label(service, config.MARKER_LABEL)
+        logger.info("Etiqueta de marca creada: {} ({})", config.MARKER_LABEL, marker_id)
+        time.sleep(0.2)
+    label_map["__marker__"] = marker_id
 
-        if full_name in existing:
-            label_id = existing[full_name]
-            logger.debug("Etiqueta ya existe: {} ({})", full_name, label_id)
+    for category in categories:
+        if category in existing:
+            label_id = existing[category]
+            logger.debug("Etiqueta ya existe: {} ({})", category, label_id)
         elif dry_run:
             label_id = f"DRY_RUN_{category}"
-            logger.info("[DRY RUN] Se crearía etiqueta: {}", full_name)
+            logger.info("[DRY RUN] Se crearía etiqueta: {}", category)
         else:
-            label_id = create_gmail_label(service, full_name)
-            logger.info("Etiqueta creada: {} ({})", full_name, label_id)
+            label_id = create_gmail_label(service, category)
+            logger.info("Etiqueta creada: {} ({})", category, label_id)
             time.sleep(0.2)
 
         label_map[category] = label_id
@@ -77,12 +96,87 @@ def ensure_labels_exist(service, dry_run: bool = False) -> dict[str, str]:
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=15))
-def apply_labels_to_message(service, msg_id: str, label_ids: list[str]):
-    """Aplica etiquetas a un mensaje específico."""
-    body = {"addLabelIds": label_ids, "removeLabelIds": []}
+def apply_labels_to_message(
+    service, msg_id: str, add_label_ids: list[str], remove_label_ids: list[str] | None = None
+):
+    """Aplica (y opcionalmente quita) etiquetas de un mensaje específico.
+
+    `remove_label_ids` permite quitar labels gestionadas (marca/categorías)
+    obsoletas del propio mensaje al re-clasificarlo, para que re-ejecutar el
+    pipeline sea seguro y no vaya acumulando etiquetas viejas.
+
+    Uso: correo nuevo procesado de uno en uno (p.ej. el cron de Vercel). Para
+    el repaso masivo local, usa `batch_apply_labels`, mucho más rápido.
+    """
+    body = {"addLabelIds": add_label_ids, "removeLabelIds": remove_label_ids or []}
     service.users().messages().modify(
         userId="me", id=msg_id, body=body
     ).execute()
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=15))
+def batch_apply_labels(
+    service, msg_ids: list[str], add_label_ids: list[str], remove_label_ids: list[str] | None = None
+):
+    """Aplica el mismo conjunto de etiquetas a hasta 1000 mensajes en una
+    sola llamada (`users.messages.batchModify`). Muchísimo más rápido que
+    `apply_labels_to_message` uno a uno para un repaso masivo, siempre que
+    los mensajes del lote compartan exactamente las mismas etiquetas a
+    añadir/quitar (ver `apply_all_labels`, que agrupa por esa combinación)."""
+    body = {
+        "ids": msg_ids,
+        "addLabelIds": add_label_ids,
+        "removeLabelIds": remove_label_ids or [],
+    }
+    service.users().messages().batchModify(userId="me", body=body).execute()
+
+
+def cleanup_orphan_labels(
+    service, keep_categories: list[str], dry_run: bool = False
+) -> list[str]:
+    """Borra labels de categorías que ya gestionamos (según la tabla
+    `taxonomy` local) pero que ya no están en `keep_categories` y no tienen
+    ningún mensaje asociado — huérfanas de una taxonomía anterior. Como las
+    categorías ahora son labels sueltas sin prefijo compartido, la única
+    forma fiable de saber "qué label es nuestra" es lo que ya creamos
+    nosotros mismos (tabla `taxonomy`), no el nombre de la label en Gmail.
+    Devuelve los nombres borrados (o que se borrarían, en dry-run)."""
+    known = db.get_taxonomy()  # {categoría: gmail_label_id} ya creadas alguna vez
+    orphan_categories = set(known) - set(keep_categories)
+    deleted = []
+
+    for category in orphan_categories:
+        label_id = known[category]
+
+        try:
+            detail = service.users().labels().get(userId="me", id=label_id).execute()
+        except HttpError as e:
+            if e.resp.status == 404:
+                # Ya no existe en Gmail (p.ej. borrada a mano) — limpiar solo la BD.
+                if not dry_run:
+                    db.delete_taxonomy_label(category)
+                deleted.append(category)
+                continue
+            raise
+
+        msg_count = detail.get("messagesTotal", 0)
+        if msg_count > 0:
+            logger.warning(
+                "Label huérfana {} tiene {} mensajes, no se borra automáticamente.",
+                category,
+                msg_count,
+            )
+            continue
+
+        if dry_run:
+            logger.info("[DRY RUN] Se borraría label vacía: {}", category)
+        else:
+            service.users().labels().delete(userId="me", id=label_id).execute()
+            db.delete_taxonomy_label(category)
+            logger.info("Label huérfana borrada: {}", category)
+        deleted.append(category)
+
+    return deleted
 
 
 def apply_all_labels(dry_run: bool = False, batch_limit: int = 0):
@@ -101,10 +195,20 @@ def apply_all_labels(dry_run: bool = False, batch_limit: int = 0):
     if not label_map:
         return
 
+    marker_id = label_map.get("__marker__")
+    marker_ids = {marker_id} if marker_id and not marker_id.startswith("DRY_RUN_") else set()
+
+    # IDs de todas las labels que gestionamos (marca + categorías), para poder
+    # detectar y quitar restos de una clasificación anterior sobre el mismo
+    # mensaje al re-ejecutar el pipeline.
+    managed_label_ids = {
+        lid for lid in label_map.values() if lid and not lid.startswith("DRY_RUN_")
+    }
+
     # Obtener clasificaciones pendientes
     with db.get_db() as conn:
         query = """
-            SELECT c.email_id, c.labels, e.subject, e.sender
+            SELECT c.email_id, c.labels, e.subject, e.sender, e.labels_original
             FROM classifications c
             JOIN emails e ON c.email_id = e.id
             WHERE c.applied = 0
@@ -130,48 +234,67 @@ def apply_all_labels(dry_run: bool = False, batch_limit: int = 0):
 
     pbar = tqdm(total=total, desc="Aplicando etiquetas", unit="emails")
 
-    for row in rows:
-        email_id = row["email_id"]
-        categories = json.loads(row["labels"])
-        subject = row["subject"][:60]
-
-        # Mapear categorías a label IDs de Gmail
-        gmail_label_ids = []
-        for cat in categories:
-            lid = label_map.get(cat)
-            if lid and not lid.startswith("DRY_RUN_"):
-                gmail_label_ids.append(lid)
-
-        if dry_run:
-            cats_str = ", ".join(categories)
+    if dry_run:
+        for row in rows:
+            categories = json.loads(row["labels"])
             logger.info(
                 "[DRY RUN] {} → [{}] | {}",
-                subject,
-                cats_str,
+                row["subject"][:60],
+                ", ".join(categories),
                 row["sender"],
             )
             applied_count += 1
-        else:
-            if gmail_label_ids:
-                try:
-                    apply_labels_to_message(service, email_id, gmail_label_ids)
-                    db.mark_as_applied([email_id])
-                    applied_count += 1
-                    time.sleep(0.05)  # Rate limiting
-                except Exception as e:
-                    error_count += 1
-                    logger.error(
-                        "Error etiquetando {} ({}): {}", email_id, subject, e
-                    )
-                    if error_count > 50:
-                        logger.error("Demasiados errores, deteniendo.")
-                        break
+            pbar.update(1)
+        pbar.close()
+        logger.success("{} emails simulados, {} errores.", applied_count, error_count)
+        return
 
-        pbar.update(1)
+    # Agrupar por la combinación exacta de labels a añadir/quitar, para poder
+    # aplicar hasta 1000 mensajes por llamada con batchModify en vez de una
+    # llamada por email (esto último tardaría horas para bandejas grandes).
+    groups: dict[tuple[tuple[str, ...], tuple[str, ...]], list[str]] = {}
+    for row in rows:
+        email_id = row["email_id"]
+        categories = json.loads(row["labels"])
+
+        gmail_label_ids = [
+            lid
+            for cat in categories
+            if (lid := label_map.get(cat)) and not lid.startswith("DRY_RUN_")
+        ]
+        add_label_ids = {*gmail_label_ids, *marker_ids}
+        if not add_label_ids:
+            continue
+
+        current_ids = set(json.loads(row["labels_original"] or "[]"))
+        remove_label_ids = (current_ids & managed_label_ids) - add_label_ids
+
+        key = (tuple(sorted(add_label_ids)), tuple(sorted(remove_label_ids)))
+        groups.setdefault(key, []).append(email_id)
+
+    consecutive_chunk_errors = 0
+    for (add_key, remove_key), email_ids in groups.items():
+        for i in range(0, len(email_ids), 1000):
+            chunk = email_ids[i : i + 1000]
+            try:
+                batch_apply_labels(service, chunk, list(add_key), list(remove_key))
+                db.mark_as_applied(chunk)
+                applied_count += len(chunk)
+                consecutive_chunk_errors = 0
+                time.sleep(0.3)  # Rate limiting entre llamadas batch
+            except Exception as e:
+                error_count += len(chunk)
+                consecutive_chunk_errors += 1
+                logger.error("Error en lote de {} emails: {}", len(chunk), e)
+                if consecutive_chunk_errors > 5:
+                    logger.error("Demasiados lotes fallidos seguidos, deteniendo.")
+                    pbar.update(total - applied_count - error_count)
+                    pbar.close()
+                    logger.success(
+                        "{} emails etiquetados, {} errores.", applied_count, error_count
+                    )
+                    return
+            pbar.update(len(chunk))
 
     pbar.close()
-
-    action = "simulados" if dry_run else "etiquetados"
-    logger.success(
-        "{} emails {}, {} errores.", applied_count, action, error_count
-    )
+    logger.success("{} emails etiquetados, {} errores.", applied_count, error_count)

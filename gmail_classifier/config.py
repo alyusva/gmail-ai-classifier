@@ -10,7 +10,12 @@ from dotenv import load_dotenv
 # .parent.parent nos lleva a la raíz del proyecto
 PROJECT_DIR = Path(__file__).parent.parent
 DATA_DIR = PROJECT_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
+try:
+    DATA_DIR.mkdir(exist_ok=True)
+except OSError:
+    # Filesystem de solo lectura (p.ej. la función serverless en Vercel, que
+    # no usa SQLite ni credentials.json locales, solo la taxonomía/config).
+    pass
 
 DB_PATH = DATA_DIR / "emails.db"
 CREDENTIALS_PATH = PROJECT_DIR / "credentials.json"
@@ -32,44 +37,41 @@ GMAIL_MAX_RESULTS_PER_PAGE = 500  # máximo permitido por Gmail API
 
 # === Anthropic API ===
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 CLASSIFY_BATCH_SIZE = int(os.getenv("CLASSIFY_BATCH_SIZE", "50"))  # emails por llamada a Claude
 
 # === Taxonomía por defecto ===
+# "Otros" no se incluye aquí: es la categoría de último recurso para correos
+# ambiguos (ver FALLBACK_CATEGORY), no una categoría objetivo del usuario.
 DEFAULT_TAXONOMY = [
-    "Newsletters",
-    "Compras/Pedidos",
     "Bancos/Finanzas",
-    "Trabajo",
-    "Redes Sociales",
-    "Suscripciones/SaaS",
-    "Notificaciones/Alertas",
-    "Personal",
-    "Spam/Promociones",
+    "Compras/Pedidos",
     "Desarrollo/Tech",
     "Formación/Educación",
-    "Viajes/Transporte",
     "Gobierno/Administración",
-    "Salud",
-    "Otros",
+    "Hipoteca",
+    "Newsletters",
+    "Notificaciones/Alertas",
+    "Personal",
+    "Redes Sociales",
+    "Salud/Deporte",
+    "Spam/Promociones",
+    "Suscripciones/SaaS",
+    "Trabajo",
+    "Viajes/Transporte",
 ]
+FALLBACK_CATEGORY = "Otros"
+MAX_LABELS_PER_EMAIL = 2
 
-# === Label prefix en Gmail ===
-LABEL_PREFIX = os.getenv("LABEL_PREFIX", "AutoSort")  # Las etiquetas se crean como "AutoSort/Categoria"
+# === Etiqueta de marca en Gmail ===
+# Las categorías se crean como labels sueltas de nivel superior (p.ej.
+# "Trabajo", "Bancos/Finanzas" — el "/" interno es parte del nombre de esa
+# categoría, no un prefijo añadido). Además, todo email procesado recibe la
+# label de marca MARKER_LABEL (p.ej. "IA"), que NO es padre de las demás,
+# para poder detectar correo nuevo con una simple query de Gmail
+# (-label:IA) sin necesitar ninguna base de datos externa.
+MARKER_LABEL = os.getenv("MARKER_LABEL", "IA")
 
 # === Logging ===
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = DATA_DIR / "classifier.log"
-
-# === Supabase (base de datos en la nube) ===
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-
-# === Modo de base de datos ===
-# "local"    → SQLite en DATA_DIR/emails.db
-# "supabase" → PostgreSQL en Supabase
-DB_MODE = os.getenv("DB_MODE", "local")
-
-# Alias para compatibilidad con scripts de migración
-DB_FILE = str(DB_PATH)

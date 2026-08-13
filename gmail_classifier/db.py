@@ -168,6 +168,11 @@ def get_taxonomy() -> dict[str, str]:
         return {r["label"]: r["gmail_label_id"] for r in rows}
 
 
+def delete_taxonomy_label(label: str):
+    with get_db() as conn:
+        conn.execute("DELETE FROM taxonomy WHERE label = ?", (label,))
+
+
 def get_stats() -> dict:
     """Estadísticas generales."""
     with get_db() as conn:

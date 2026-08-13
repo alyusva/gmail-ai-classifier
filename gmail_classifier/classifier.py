@@ -15,9 +15,9 @@ SYSTEM_PROMPT = """Eres un asistente experto en organización de correo electró
 Tu tarea es clasificar emails en categorías basándote en su asunto (subject), remitente (sender) y snippet.
 
 REGLAS:
-1. Asigna exactamente 1 categoría principal por email (excepcionalmente 2 si claramente pertenece a dos).
-2. Usa SOLO categorías de la taxonomía proporcionada.
-3. Si un email no encaja bien en ninguna categoría, usa "Otros".
+1. Asigna 1 categoría principal por email (excepcionalmente 2 si claramente pertenece a dos).
+2. Usa SOLO categorías de la lista proporcionada.
+3. "Otros" es una categoría de último recurso: úsala solo si el email no encaja razonablemente en ninguna de las demás. No la combines con otra categoría.
 4. Sé consistente: el mismo tipo de remitente siempre debe ir a la misma categoría.
 5. Prioriza la intención del email sobre el remitente (ej: un email de Amazon sobre un pedido = "Compras/Pedidos", un email promocional de Amazon = "Spam/Promociones").
 
@@ -84,10 +84,17 @@ def get_taxonomy_list() -> list[str]:
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=2, min=5, max=60),
 )
-def classify_batch(client: anthropic.Anthropic, emails: list[dict]) -> list[dict]:
-    """Clasifica un batch de emails usando Claude."""
-    taxonomy = get_taxonomy_list()
-    taxonomy_str = "\n".join(f"- {t}" for t in taxonomy)
+def classify_emails(
+    client: anthropic.Anthropic, emails: list[dict], taxonomy: list[str]
+) -> list[dict]:
+    """Clasifica un batch de emails contra una taxonomía dada.
+
+    Función pura respecto a la BD local (no usa `db`): la usan tanto el
+    pipeline local (vía `classify_batch`) como la función cron de Vercel,
+    que no tiene SQLite disponible.
+    """
+    full_taxonomy = [*taxonomy, config.FALLBACK_CATEGORY]
+    taxonomy_str = "\n".join(f"- {t}" for t in full_taxonomy)
 
     prompt = CLASSIFY_PROMPT_TEMPLATE.format(
         count=len(emails),
@@ -120,15 +127,15 @@ def classify_batch(client: anthropic.Anthropic, emails: list[dict]) -> list[dict
         raise
 
     # Validar formato
-    valid_labels = set(taxonomy)
+    valid_labels = set(full_taxonomy)
     validated = []
     for r in results:
         if "id" not in r or "labels" not in r:
             continue
         # Filtrar labels que no estén en la taxonomía
-        clean_labels = [l for l in r["labels"] if l in valid_labels]
+        clean_labels = [l for l in r["labels"] if l in valid_labels][: config.MAX_LABELS_PER_EMAIL]
         if not clean_labels:
-            clean_labels = ["Otros"]
+            clean_labels = [config.FALLBACK_CATEGORY]
         validated.append(
             {
                 "email_id": r["id"],
@@ -138,6 +145,11 @@ def classify_batch(client: anthropic.Anthropic, emails: list[dict]) -> list[dict
         )
 
     return validated
+
+
+def classify_batch(client: anthropic.Anthropic, emails: list[dict]) -> list[dict]:
+    """Clasifica un batch usando la taxonomía guardada en la BD local (uso CLI)."""
+    return classify_emails(client, emails, get_taxonomy_list())
 
 
 def classify_all_emails():

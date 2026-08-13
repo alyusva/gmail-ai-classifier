@@ -1,13 +1,14 @@
 {
-  "buildCommand": "cd web && npm run build",
-  "outputDirectory": "web/.next",
-  "installCommand": "cd web && npm install",
-  "framework": "nextjs",
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/web/$1" }
-  ],
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "@supabase_url",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key"
-  }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/classify_new.py": {
+      "maxDuration": 300
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/classify_new",
+      "schedule": "0 6 * * 1"
+    }
+  ]
 }

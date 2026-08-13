@@ -18,15 +18,6 @@ from tabulate import tabulate
 from . import config
 
 
-def _get_db_module():
-    """Devuelve el módulo de BD según DB_MODE (local o supabase)."""
-    if config.DB_MODE == "supabase":
-        from . import supabase_db as db_module
-    else:
-        from . import db as db_module
-    return db_module
-
-
 def setup_logging(verbose: bool = False):
     """Configura loguru."""
     logger.remove()
@@ -89,7 +80,8 @@ def cmd_apply(args):
 
 def cmd_stats(args):
     """Muestra estadísticas de clasificación."""
-    db = _get_db_module()
+    from . import db
+
     db.init_db()
     stats = db.get_stats()
 
@@ -131,6 +123,23 @@ def cmd_dry_run(args):
     args.dry_run = True
     args.limit = args.limit if hasattr(args, "limit") else 50
     cmd_apply(args)
+
+
+def cmd_cleanup_labels(args):
+    """Borra labels de categoría huérfanas (fuera de la taxonomía actual y sin mensajes)."""
+    from .applier import cleanup_orphan_labels
+    from .extractor import get_gmail_service
+
+    dry_run = args.dry_run if hasattr(args, "dry_run") else False
+    service = get_gmail_service()
+    keep = config.DEFAULT_TAXONOMY + [config.FALLBACK_CATEGORY]
+    deleted = cleanup_orphan_labels(service, keep, dry_run=dry_run)
+
+    if not deleted:
+        print("No había labels huérfanas que borrar.")
+    else:
+        action = "Se borrarían" if dry_run else "Borradas"
+        print(f"{action} {len(deleted)} labels huérfanas: {', '.join(deleted)}")
 
 
 def cmd_reset(args):
@@ -227,12 +236,6 @@ Flujo recomendado:
         """,
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Modo verbose")
-    parser.add_argument(
-        "--db",
-        choices=["local", "supabase"],
-        default=None,
-        help="Backend de BD: local (SQLite) o supabase. Por defecto usa DB_MODE del .env",
-    )
 
     subparsers = parser.add_subparsers(dest="command", help="Comando a ejecutar")
 
@@ -285,17 +288,18 @@ Flujo recomendado:
         "--dry-run", action="store_true", help="Simular sin aplicar etiquetas"
     )
 
+    # Cleanup labels
+    p_cleanup = subparsers.add_parser(
+        "cleanup-labels", help="Borra labels AutoSort/* huérfanas (fuera de la taxonomía y sin mensajes)"
+    )
+    p_cleanup.add_argument(
+        "--dry-run", action="store_true", help="Solo mostrar qué se borraría"
+    )
+
     args = parser.parse_args()
     setup_logging(verbose=args.verbose)
 
-    # Permite sobrescribir DB_MODE desde CLI
-    if args.db:
-        config.DB_MODE = args.db
-
-    if config.DB_MODE == "supabase":
-        logger.info("Backend: Supabase ({})", config.SUPABASE_URL or "URL no configurada")
-    else:
-        logger.info("Backend: SQLite local ({})", config.DB_PATH)
+    logger.info("Backend: SQLite local ({})", config.DB_PATH)
 
     if not args.command:
         parser.print_help()
@@ -309,6 +313,7 @@ Flujo recomendado:
         "dry-run": cmd_dry_run,
         "reset": cmd_reset,
         "auto": cmd_auto,
+        "cleanup-labels": cmd_cleanup_labels,
     }
 
     cmd_func = commands.get(args.command)

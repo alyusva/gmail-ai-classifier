@@ -8,7 +8,7 @@ Este proyecto maneja información sensible que **NUNCA debe ser commiteada** a G
 
 | Archivo | Contenido | Protección |
 |---------|-----------|------------|
-| `.env` | API keys (Anthropic, Supabase) | ✅ En `.gitignore` |
+| `.env` | API keys (Anthropic) | ✅ En `.gitignore` |
 | `credentials.json` | OAuth credentials de Google | ✅ En `.gitignore` |
 | `data/token.json` | Token OAuth generado | ✅ En `.gitignore` |
 | `data/*.db` | Base de datos SQLite con emails | ✅ En `.gitignore` |
@@ -46,14 +46,11 @@ Para configurar secrets en tu repositorio de GitHub:
 # Anthropic API Key
 gh secret set ANTHROPIC_API_KEY --body "sk-ant-api03-..."
 
-# Supabase (si usas la versión cloud)
-gh secret set SUPABASE_URL --body "https://xxx.supabase.co"
-gh secret set SUPABASE_ANON_KEY --body "eyJhbGciOiJIUzI1NiI..."
-gh secret set SUPABASE_SERVICE_KEY --body "eyJhbGciOiJIUzI1NiI..."
-
 # Listar secrets configurados
 gh secret list
 ```
+
+Las variables que necesita la función cron en Vercel (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `ANTHROPIC_API_KEY`, `CRON_SECRET`) se configuran con `vercel env add`, no como GitHub Secret.
 
 #### Usando la interfaz web de GitHub
 

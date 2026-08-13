@@ -76,6 +76,27 @@ def extract_headers(headers: list[dict]) -> dict:
     return result
 
 
+def build_email_record(msg: dict) -> dict:
+    """Convierte un mensaje de la Gmail API (formato metadata) en el dict
+    plano usado por el resto del pipeline. No depende de la BD ni del
+    servicio de Gmail, así que también la usa la función cron de Vercel."""
+    headers = extract_headers(msg.get("payload", {}).get("headers", []))
+    sender_name, sender_email = parse_sender(headers.get("from", ""))
+    label_ids = msg.get("labelIds", [])
+
+    return {
+        "id": msg["id"],
+        "thread_id": msg.get("threadId", ""),
+        "subject": headers.get("subject", "(sin asunto)"),
+        "sender": sender_name,
+        "sender_email": sender_email,
+        "snippet": msg.get("snippet", ""),
+        "date": headers.get("date", ""),
+        "labels": label_ids,
+        "is_read": "UNREAD" not in label_ids,
+    }
+
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=30),
@@ -164,23 +185,7 @@ def extract_all_emails(max_emails: Optional[int] = None):
                     logger.error("Saltando mensaje {} tras reintentos: {}", msg_id, e)
                     continue
 
-                headers = extract_headers(msg.get("payload", {}).get("headers", []))
-                sender_name, sender_email = parse_sender(headers.get("from", ""))
-                label_ids = msg.get("labelIds", [])
-
-                batch_emails.append(
-                    {
-                        "id": msg_id,
-                        "thread_id": msg.get("threadId", ""),
-                        "subject": headers.get("subject", "(sin asunto)"),
-                        "sender": sender_name,
-                        "sender_email": sender_email,
-                        "snippet": msg.get("snippet", ""),
-                        "date": headers.get("date", ""),
-                        "labels": label_ids,
-                        "is_read": "UNREAD" not in label_ids,
-                    }
-                )
+                batch_emails.append(build_email_record(msg))
 
                 # Rate limiting suave
                 time.sleep(0.02)

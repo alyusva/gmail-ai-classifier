@@ -1,42 +1,41 @@
 # 📧 Gmail AI Classifier
 
-**Clasificador inteligente de emails usando Claude AI** - Organiza automáticamente tu bandeja de Gmail con inteligencia artificial.
+**Clasificador personal de emails usando Claude AI** — organiza tu bandeja de Gmail automáticamente.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Anthropic Claude](https://img.shields.io/badge/AI-Claude%20Sonnet%204-purple)](https://www.anthropic.com/)
-
-> 🚀 **Nuevo**: ¡Ahora con soporte para web app y despliegue en la nube!
+[![Anthropic Claude](https://img.shields.io/badge/AI-Claude%20Haiku%204.5-purple)](https://www.anthropic.com/)
 
 ## 🏗️ Arquitectura
 
+Herramienta personal, sin base de datos externa, sin web, sin multi-usuario:
+
 ```
-Gmail API ──► SQLite (local) ──► Claude API ──► Gmail Labels
-  extract        almacena         classify        apply
+CLI local (una vez / bajo demanda)
+  Gmail API ──► SQLite (local) ──► Claude API ──► Gmail Labels
+    extract        almacena         classify        apply
+
+Cron en Vercel (semanal, correo nuevo)
+  Gmail API (solo -label:IA) ──► Claude API ──► Gmail Labels
 ```
 
-**3 fases independientes y reanudables:**
-
-1. **Extract** → Descarga metadata de todos tus emails a SQLite local
-2. **Classify** → Envía batches a Claude para clasificar por categorías
-3. **Apply** → Crea etiquetas en Gmail y las aplica a cada email
+- **CLI local** (`gmail_classifier/`): repaso completo de tu bandeja — extract → classify → stats → dry-run → apply. Usa SQLite para poder reanudar y revisar antes de aplicar nada.
+- **Función cron en Vercel** (`api/classify_new.py`): una vez a la semana, busca correo que aún no tenga la label `IA` y lo clasifica. No usa ninguna base de datos: la propia label `IA` (aplicada a todo email procesado) es la marca de "ya visto".
 
 ## 📋 Requisitos previos
 
 - Python 3.10+
 - Una cuenta de Google (Gmail)
 - Una API key de Anthropic ([console.anthropic.com](https://console.anthropic.com))
+- (Solo para el cron) Una cuenta de [Vercel](https://vercel.com) y el [Vercel CLI](https://vercel.com/docs/cli)
 
-## 🚀 Setup paso a paso
+## 🚀 Setup local paso a paso
 
-### 1. Clonar y preparar entorno
+### 1. Preparar entorno
 
 ```bash
-cd gmail_classifier
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
-# o: venv\Scripts\activate  # Windows
-
 pip install -r requirements.txt
 ```
 
@@ -44,66 +43,57 @@ pip install -r requirements.txt
 
 1. Ve a [Google Cloud Console](https://console.cloud.google.com/)
 2. Crea un nuevo proyecto (o usa uno existente)
-3. Ve a **APIs & Services → Library**
-4. Busca **"Gmail API"** y habilítala
-5. Ve a **APIs & Services → Credentials**
-6. Click en **"Create Credentials" → "OAuth client ID"**
-7. Si te pide configurar la pantalla de consentimiento:
+3. **APIs & Services → Library** → busca **"Gmail API"** y habilítala
+4. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
+5. Si te pide configurar la pantalla de consentimiento:
    - Tipo: **External**
-   - Nombre de la app: "Gmail Classifier" (o lo que quieras)
+   - Nombre de la app: lo que quieras
    - Añade tu email como usuario de prueba
-8. Tipo de aplicación: **Desktop app**
-9. Descarga el JSON y guárdalo como **`credentials.json`** en la raíz del proyecto (junto a `requirements.txt`)
+6. Tipo de aplicación: **Desktop app**
+7. Descarga el JSON y guárdalo como **`credentials.json`** en la raíz del proyecto
 
-> ⚠️ **Importante**: Al ser una app "en testing", Google limita a 100 usuarios. Como solo eres tú, no hay problema. La primera vez que ejecutes `extract`, se abrirá el navegador para autenticarte.
+> ⚠️ Al ser una app "en testing", Google limita a 100 usuarios — como solo eres tú, no hay problema. La primera vez que ejecutes `extract` se abrirá el navegador para autenticarte, y se guardará el token (con su refresh_token) en `data/token.json`.
 
 ### 3. Configurar API de Anthropic
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-api03-tu-clave-aqui"
+cp .env.example .env
+# Edita .env y añade tu ANTHROPIC_API_KEY
 ```
 
-Para hacerlo persistente, añádelo a tu `.bashrc` / `.zshrc`:
+### 4. (Opcional) Ajustar taxonomía
 
-```bash
-echo 'export ANTHROPIC_API_KEY="sk-ant-api03-tu-clave-aqui"' >> ~/.zshrc
+Las 15 categorías por defecto están en `gmail_classifier/config.py` → `DEFAULT_TAXONOMY`, más una categoría oculta `Otros` (`FALLBACK_CATEGORY`) para correos que no encajan claramente en ninguna:
+
+```
+Bancos/Finanzas · Compras/Pedidos · Desarrollo/Tech · Formación/Educación ·
+Gobierno/Administración · Hipoteca · Newsletters · Notificaciones/Alertas ·
+Personal · Redes Sociales · Salud/Deporte · Spam/Promociones ·
+Suscripciones/SaaS · Trabajo · Viajes/Transporte
 ```
 
-### 4. (Opcional) Personalizar taxonomía
-
-Edita `gmail_classifier/config.py` y modifica `DEFAULT_TAXONOMY` con tus categorías preferidas:
-
-```python
-DEFAULT_TAXONOMY = [
-    "Newsletters",
-    "Compras/Pedidos",
-    "Bancos/Finanzas",
-    "Trabajo/Dentsu",          # ← Personaliza
-    "Trabajo/Anteriores",      # ← Personaliza
-    "Redes Sociales",
-    # ... etc
-]
-```
-
-## 📖 Uso
+## 📖 Uso — CLI local
 
 ### Flujo completo recomendado
 
 ```bash
-# 1️⃣ Extraer emails (primera vez tarda ~30-60 min para 17K emails)
+# 1️⃣ Extraer emails (metadata: asunto/remitente/snippet, no el cuerpo)
 python -m gmail_classifier.main extract
 
-# 2️⃣ Clasificar con Claude (~$2-5 USD para 17K emails)
+# 2️⃣ Clasificar con Claude
 python -m gmail_classifier.main classify
 
-# 3️⃣ Revisar estadísticas ANTES de aplicar
+# 3️⃣ Revisar la distribución ANTES de tocar Gmail
 python -m gmail_classifier.main stats
 
-# 4️⃣ Simular (dry-run) para ver qué haría
+# 4️⃣ Simular (dry-run) para ver qué haría, sin aplicar nada
 python -m gmail_classifier.main dry-run --limit 100
 
-# 5️⃣ Aplicar etiquetas en Gmail
+# 5️⃣ Aplicar etiquetas en Gmail (de verdad)
 python -m gmail_classifier.main apply
+
+# 6️⃣ (Opcional) Borrar labels de categorías huérfanas (vacías, fuera de la taxonomía)
+python -m gmail_classifier.main cleanup-labels
 ```
 
 ### Comandos disponibles
@@ -114,71 +104,85 @@ python -m gmail_classifier.main apply
 | `extract --max 500` | Extrae solo los primeros 500 emails (para testing) |
 | `classify` | Clasifica emails no clasificados usando Claude |
 | `stats` | Muestra estadísticas y distribución por categoría |
-| `dry-run` | Simula la aplicación de etiquetas |
-| `dry-run --limit 100` | Simula solo 100 emails |
-| `apply` | Aplica las etiquetas en Gmail |
-| `apply --dry-run` | Igual que dry-run |
-| `apply --limit 1000` | Aplica solo a 1000 emails |
-| `reset all` | Borra toda la base de datos |
-| `reset classifications` | Borra solo clasificaciones (mantiene emails) |
-| `reset applied` | Resetea marcas de "aplicado" para re-aplicar |
+| `dry-run [--limit N]` | Simula la aplicación de etiquetas |
+| `apply [--dry-run] [--limit N]` | Aplica las etiquetas en Gmail |
+| `cleanup-labels [--dry-run]` | Borra labels de categoría vacías fuera de la taxonomía actual |
+| `reset {all,classifications,applied}` | Borra datos locales (con confirmación) |
 
 Añade `-v` para modo verbose: `python -m gmail_classifier.main -v extract`
 
 ### ⏸️ Reanudación automática
 
-Si la extracción o clasificación se interrumpe (Ctrl+C, error de red, etc.), simplemente vuelve a ejecutar el mismo comando. El progreso se guarda automáticamente en SQLite.
-
-## 💰 Coste estimado
-
-Para **~17,700 emails** usando Claude Sonnet:
-
-| Concepto | Estimación |
-|----------|-----------|
-| Batches de clasificación | ~354 llamadas |
-| Tokens de input | ~3.5M tokens (~$10.5) |
-| Tokens de output | ~350K tokens (~$5.25) |
-| **Total estimado** | **~$15 USD** |
-| Gmail API | Gratis |
-
-> 💡 **Tip**: Para reducir costes, usa `claude-haiku-4-5-20251001` en `config.py` (~$1-2 USD total), con algo menos de precisión.
-
-## 📁 Estructura del proyecto
-
-```
-gmail_classifier/
-├── credentials.json          ← Tu archivo de Google Cloud (NO commitear)
-├── requirements.txt
-├── README.md
-├── gmail_classifier/
-│   ├── __init__.py
-│   ├── config.py             ← Configuración central
-│   ├── db.py                 ← SQLite (almacenamiento local)
-│   ├── extractor.py          ← Gmail API (descarga emails)
-│   ├── classifier.py         ← Claude API (clasificación IA)
-│   ├── applier.py            ← Gmail API (aplica etiquetas)
-│   └── main.py               ← CLI principal
-└── data/                     ← Auto-generado
-    ├── emails.db             ← Base de datos SQLite
-    ├── token.json            ← Token OAuth2 (auto-generado)
-    └── classifier.log        ← Logs
-```
+Si `extract` o `classify` se interrumpen, vuelve a ejecutar el mismo comando — el progreso se guarda en SQLite (`data/emails.db`).
 
 ## 🏷️ Etiquetas en Gmail
 
-Las etiquetas se crean bajo el prefijo **`AutoSort/`**:
+Las categorías se crean como labels **sueltas de nivel superior** (`Trabajo`, `Bancos/Finanzas`, `Personal`...) — el "/" de algunas categorías es parte de su propio nombre, no un prefijo añadido. Además, cada email procesado recibe también la label de marca **`IA`** (no es padre de nada) como marca de "ya clasificado" — es lo que le permite a la función cron detectar correo nuevo sin necesitar ninguna base de datos:
 
 ```
-AutoSort/
-├── Newsletters
-├── Compras/Pedidos
-├── Bancos/Finanzas
-├── Trabajo
-├── Redes Sociales
-├── ...
+IA                    ← marca, aplicada a TODO email procesado
+Trabajo
+Bancos/Finanzas
+Personal
+...
 ```
 
-Puedes cambiar el prefijo en `config.py` → `LABEL_PREFIX`.
+Puedes cambiar el nombre de la marca en `.env` → `MARKER_LABEL` (por defecto `IA`).
+
+## 💰 Coste estimado (Claude Haiku 4.5)
+
+Para **~20.000 emails** (batches de 50, `claude-haiku-4-5-20251001` a $1/$5 por millón de tokens input/output):
+
+| Concepto | Estimación |
+|----------|-----------|
+| Batches de clasificación | ~400 llamadas |
+| **Total estimado** | **~$3-8 USD** |
+| Gmail API | Gratis |
+
+El coste real depende de la longitud media de tus asuntos/snippets; revisa `response.usage` en los logs si quieres un número exacto para tu bandeja.
+
+## 🌐 Cron semanal en Vercel
+
+Una función Python (`api/classify_new.py`) que Vercel invoca una vez a la semana. Reutiliza el mismo código de clasificación que el CLI (`gmail_classifier/classifier.py`, `config.py`) — no hay una segunda taxonomía ni un segundo prompt que mantener sincronizados.
+
+### Cómo funciona
+
+1. Se autentica en Gmail con un **refresh_token** guardado como variable de entorno (sin flujo interactivo — ver más abajo cómo obtenerlo).
+2. Asegura que existen la label de marca `IA` y las 15 de categoría.
+3. Busca mensajes con `-label:IA` (correo que nunca ha sido procesado).
+4. Los clasifica con Claude y aplica las etiquetas correspondientes.
+5. Devuelve un resumen JSON (visible en `vercel logs`).
+
+### Desplegar
+
+1. **Obtén el refresh_token**: tras ejecutar `extract` en local al menos una vez, copia el campo `"refresh_token"` de `data/token.json` (nunca lo pegues en el chat ni lo subas a git).
+2. **Configura las variables de entorno en Vercel**:
+
+   ```bash
+   vercel link
+   vercel env add ANTHROPIC_API_KEY
+   vercel env add ANTHROPIC_MODEL          # claude-haiku-4-5-20251001
+   vercel env add GOOGLE_CLIENT_ID         # de credentials.json
+   vercel env add GOOGLE_CLIENT_SECRET     # de credentials.json
+   vercel env add GOOGLE_REFRESH_TOKEN     # de data/token.json
+   vercel env add CRON_SECRET              # openssl rand -hex 32
+   vercel env add MARKER_LABEL             # IA
+   ```
+
+3. **Despliega**:
+
+   ```bash
+   vercel deploy --prod
+   ```
+
+4. **Prueba manualmente** antes de dejar que el cron corra solo:
+
+   ```bash
+   curl -H "Authorization: Bearer $CRON_SECRET" \
+     https://<tu-proyecto>.vercel.app/api/classify_new
+   ```
+
+5. **Verifica el cron** en el dashboard de Vercel → Project → Settings → Cron Jobs. La programación está en `vercel.json` (`0 6 * * 1` = lunes 06:00 UTC); cámbiala ahí si quieres otro día/hora.
 
 ## 🔧 Troubleshooting
 
@@ -186,208 +190,48 @@ Puedes cambiar el prefijo en `config.py` → `LABEL_PREFIX`.
 → Descarga el OAuth client JSON desde Google Cloud Console y colócalo en la raíz del proyecto.
 
 **"ANTHROPIC_API_KEY no configurada"**
-→ `export ANTHROPIC_API_KEY=sk-ant-...`
+→ `export ANTHROPIC_API_KEY=sk-ant-...` o añádela a `.env`.
 
 **"Token has been expired or revoked"**
-→ Borra `data/token.json` y ejecuta `extract` de nuevo para re-autenticarte.
+→ Borra `data/token.json` y ejecuta `extract` de nuevo para re-autenticarte (y actualiza `GOOGLE_REFRESH_TOKEN` en Vercel con el nuevo valor).
 
-**"Rate limit exceeded" (Gmail)**
-→ El script ya tiene rate limiting. Si persiste, espera unos minutos y re-ejecuta.
+**"Rate limit exceeded" (Gmail o Claude)**
+→ El script ya tiene rate limiting incorporado; si persiste, reduce `CLASSIFY_BATCH_SIZE` en `.env` y reintenta.
 
-**"Rate limit exceeded" (Claude)**
-→ Aumenta el `time.sleep()` en `classifier.py` o reduce `CLASSIFY_BATCH_SIZE` en `config.py`.
+**El cron de Vercel no clasifica nada**
+→ Comprueba que `GOOGLE_REFRESH_TOKEN` sigue siendo válido y que las 4 variables de Google/Anthropic están puestas; revisa `vercel logs` para el error exacto.
 
 ## 🛡️ Seguridad
 
-### Archivos sensibles protegidos
+Ver [SECURITY.md](SECURITY.md) para el detalle completo. Resumen:
 
-El proyecto incluye un `.gitignore` completo que protege automáticamente:
+- `credentials.json`, `.env`, `data/` están en `.gitignore` — nunca se commitean.
+- Los permisos de Gmail solicitados son mínimos: `gmail.modify` y `gmail.labels`. No puede enviar ni borrar emails.
+- El secret del cron (`CRON_SECRET`) evita que `/api/classify_new` sea invocable públicamente.
 
-- ✅ `credentials.json` - Credenciales OAuth de Google
-- ✅ `.env` - Variables de entorno con API keys
-- ✅ `data/` - Base de datos local y tokens
-- ✅ `*.db` - Archivos SQLite
-- ✅ `token.json` - Tokens OAuth generados
+## 📁 Estructura del proyecto
 
-### Variables de entorno
-
-Usa el archivo `.env` para configuración local (ya está en `.gitignore`):
-
-```bash
-# Copia el template
-cp .env.example .env
-
-# Edita con tus credenciales
-nano .env
 ```
-
-### GitHub Secrets (para CI/CD)
-
-Si usas GitHub Actions, configura estos secrets:
-
-```bash
-# Usando gh CLI
-gh secret set ANTHROPIC_API_KEY
-gh secret set SUPABASE_URL
-gh secret set SUPABASE_ANON_KEY
+gmail_classifier/
+├── credentials.json          ← Tu archivo de Google Cloud (NO commitear)
+├── gmail_classifier/
+│   ├── config.py             ← Taxonomía, modelo, configuración central
+│   ├── db.py                 ← SQLite (uso local)
+│   ├── extractor.py          ← Gmail API (descarga emails, uso local)
+│   ├── classifier.py         ← Claude API (clasificación IA, compartido con Vercel)
+│   ├── applier.py            ← Gmail API (aplica etiquetas, uso local)
+│   ├── gmail_auth.py         ← Credenciales desde refresh_token (uso Vercel)
+│   └── main.py                ← CLI principal
+├── api/
+│   └── classify_new.py       ← Función cron de Vercel (correo nuevo, semanal)
+├── vercel.json                ← Configuración del cron
+└── data/                      ← Auto-generado (SQLite, token, logs)
 ```
-
-### Permisos de Gmail
-
-Los permisos solicitados son mínimos:
-- ✅ `gmail.modify` - Modificar etiquetas
-- ✅ `gmail.labels` - Gestionar etiquetas
-- ❌ NO puede enviar emails
-- ❌ NO puede borrar emails
-
-## 🌐 Web App & Cloud Deployment
-
-### Migrar a Supabase (Base de datos en la nube)
-
-```bash
-# Ver guía completa de migración
-cat docs/SUPABASE_MIGRATION.md
-
-# O ejecutar el script de migración
-python scripts/migrate_to_supabase.py
-```
-
-**Beneficios**:
-- ✅ Base de datos accesible desde cualquier lugar
-- ✅ Backups automáticos
-- ✅ Multi-usuario
-- ✅ APIs automáticas
-
-### Web App (Next.js + React)
-
-```bash
-# Instalar dependencias
-cd web
-npm install
-
-# Configurar variables de entorno
-cp .env.example .env.local
-# Editar .env.local con tus credenciales
-
-# Iniciar en desarrollo
-npm run dev
-
-# Abrir http://localhost:3000
-```
-
-**Características de la web app**:
-- 📊 Dashboard con estadísticas en tiempo real
-- ⚙️ Configuración de categorías personalizadas
-- 🏷️ Gestión de etiquetas
-- 📈 Gráficos de distribución
-- 🔄 Clasificación manual/automática
-- 👤 Multi-usuario (próximamente)
-
-### Deploy en la Nube
-
-#### Opción 1: Vercel (Frontend + API Routes)
-
-```bash
-# Instalar Vercel CLI
-npm i -g vercel
-
-# Desde /web
-cd web
-vercel
-
-# Configurar variables de entorno en Vercel Dashboard
-# - SUPABASE_URL
-# - SUPABASE_ANON_KEY
-# - ANTHROPIC_API_KEY
-```
-
-#### Opción 2: Google Cloud Functions (Backend)
-
-```bash
-# Ver guía completa
-cat cloud_function/README.md
-
-# Deploy rápido
-cd cloud_function
-gcloud functions deploy gmail_classifier \
-  --runtime python311 \
-  --trigger-http \
-  --entry-point classify_emails \
-  --set-env-vars ANTHROPIC_API_KEY=xxx,SUPABASE_URL=xxx
-```
-
-## 🤖 Automatización Avanzada
-
-Configura la clasificación automática de nuevos emails:
-
-```bash
-# Setup interactivo
-./setup_automation.sh
-```
-
-**Opciones disponibles**:
-- 📅 **Cron Job**: Ejecutar diariamente en tu Mac
-- 🍎 **Launchd**: Servicio nativo de macOS (recomendado para local)
-- ☁️ **Cloud Function**: Clasificación en tiempo real en la nube
-- 🔔 **Gmail Push**: Trigger automático con nuevos emails
-
-Ver guía completa: [AUTOMATION.md](AUTOMATION.md)
-
-## 📈 Roadmap
-
-- [x] Clasificación básica con IA
-- [x] Auto-etiquetado en Gmail
-- [x] CLI funcional
-- [x] Automatización local
-- [ ] Web app completa
-- [ ] Migración a Supabase
-- [ ] Multi-usuario
-- [ ] Dashboard analytics
-- [ ] Clasificación en tiempo real (Push Notifications)
-- [ ] Filtros personalizados
-- [ ] Exportar/importar configuración
-- [ ] API REST pública
-- [ ] Extensión de Chrome
-
-## 💰 Costos Cloud
-
-**Producción en cloud** (estimado mensual):
-- **Anthropic API**: ~$0.15 por 100 emails
-  - 1,000 emails/mes ≈ $1.50
-  - 10,000 emails/mes ≈ $15
-- **Supabase**: Gratis hasta 500MB + 2GB transferencia
-- **Google Cloud Functions**: 2M invocaciones gratis/mes
-- **Vercel**: Plan hobby gratis
-- **Total**: ~$1-20/mes dependiendo del volumen
-
-## 🤝 Contribuir
-
-Las contribuciones son bienvenidas! Por favor:
-
-1. Fork el proyecto
-2. Crea una rama (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push a la rama (`git push origin feature/AmazingFeature`)
-5. Abre un Pull Request
 
 ## 📝 Licencia
 
-MIT License - ver [LICENSE](LICENSE) para más detalles.
+MIT License — ver [LICENSE](LICENSE).
 
 ## 👤 Autor
 
-**Álvaro Yuste Valles**
-- GitHub: [@alyusva](https://github.com/alyusva)
-
-## 🙏 Agradecimientos
-
-- [Anthropic](https://www.anthropic.com/) - Claude AI
-- [Google](https://developers.google.com/gmail/api) - Gmail API
-- [Supabase](https://supabase.com/) - Base de datos en la nube
-- [Vercel](https://vercel.com/) - Hosting & deployment
-
----
-
-⭐ **Si te ha sido útil, dale una estrella al repo!**
-
-📧 **¿Quieres la versión cloud lista para usar?** Próximamente en [gmailclassifier.app](https://gmailclassifier.app)
+**Álvaro Yuste Valles** — [@alyusva](https://github.com/alyusva)

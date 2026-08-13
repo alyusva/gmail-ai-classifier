@@ -28,9 +28,8 @@ Los siguientes secrets están configurados en el repositorio para uso en workflo
 |--------|-----------|-----------|
 | `ANTHROPIC_API_KEY` | API key de Claude AI | ✅ Sí |
 | `ANTHROPIC_MODEL` | Modelo de Claude a usar | ⚠️ Opcional |
-| `SUPABASE_URL` | URL de Supabase (para cloud) | ⚠️ Solo para cloud |
-| `SUPABASE_ANON_KEY` | Key pública de Supabase | ⚠️ Solo para cloud |
-| `SUPABASE_SERVICE_KEY` | Key de servicio de Supabase | ⚠️ Solo para cloud |
+
+> Las variables del cron en Vercel (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `CRON_SECRET`) se configuran en Vercel (`vercel env add`), no como GitHub Secret — no las usa ningún workflow de este repo.
 
 ### Ver secrets configurados
 
